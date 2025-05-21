@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+enum Role {
+  user
+  assistant
+}
+
+enum SessionStatus {
+  draft
+  inprogress
+  launched
+}
+
+model Brands_Session {
+  id           String        @id @default(uuid())
+  status       SessionStatus @default(draft)
+  voiceMode      Boolean         @default(false)
+  currentIndex Int           @default(0)
+  brandQA      Brand_QA[]
+  conversations  Conversation[]
+  brandContent    BrandContent?   // Optional relation to generated content
+   brandLogo       BrandLogo?       // ✅ New optional 1:1 relation to BrandLogo
+    @@unique([id]) // Ensure session ID is unique
+
+}
+
+model Brand_QA {
+   id        Int    @id @default(autoincrement()) 
+  sessionId  String
+  stepKey    String
+  question   String
+  answer     String
+
+  session    Brands_Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, stepKey])
+}
+
+model Conversation {
+  id         String           @id @default(uuid())
+  sessionId  String
+  role       Role             
+  content    String
+  createdAt  DateTime          @default(now())
+
+  session    Brands_Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+model BrandContent {
+  id                          String    @id @default(uuid())
+  sessionId                   String
+  brandName                   String
+  brandDescription            String
+  tagline                     String
+  logoUrl                     String
+  BannerDesktop               String
+  BannerImageIpad             String
+  BannerImageMobile           String
+  phoneCompatibilityImage     String
+  coverageSubtitleImage       String
+  coverageTitle               String
+  coverageSubtitle            String
+  phoneCompatibilityTitle     String
+  phoneCompatibilitySubtitle  String
+  customUrl                   String
+  pricingPlans                String[]  // Store pricing plans as an array of strings
+
+  // ✅ New fields for colors
+  primaryColor                String
+  secondaryColor              String?   // Optional
+  tertiaryColor               String?   // Optional
+
+  session                     Brands_Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId])
+}
+
+model BrandLogo {
+  id             String  @id @default(uuid())
+  sessionId      String  @unique
+  logoUrl        String
+  primaryColor   String
+  secondaryColor String?
+  tertiaryColor  String?
+
+  session        Brands_Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+
+
+
