@@ -74,6 +74,12 @@ model BrandContent {
   primaryColor                String
   secondaryColor              String?   // Optional
   tertiaryColor               String?   // Optional
+  seoTitle              String?
+seoMetaDescription    String?
+seoOgTitle            String?
+seoOgDescription      String?
+seoTwitterTitle       String?
+seoTwitterDescription String?
 
   session                     Brands_Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 

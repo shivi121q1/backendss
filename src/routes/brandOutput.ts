@@ -34,22 +34,22 @@ Use language that is:
 Generate this JSON format:
 
 {
-  "brand_description": "Write a warm, compelling, and easy-to-read 1–2 sentence summary based on the brand story: '${qa.brandStory}', tone: '${qa.brandTone}', and audience: '${qa.targetAudience}'. Avoid using the brand name. Keep it clear and emotionally resonant.",
+  "brand_description": "Write a warm, compelling, and easy-to-read 1–2 sentence summary based on the brand story: '${qa.brandStory}', tone: '${qa.brandTone}', and audience: '${qa.targetAudience}'. Avoid using the brand name. Keep it clear and emotionally resonant. (Max character : 60 characters)",
   
-  "tagline": "Write a punchy, creative tagline under 10 words. It should hint at the brand’s tone, values, or benefits.",
+  "tagline": "Write a punchy, creative tagline under 10 words. It should hint at the brand’s tone, values, or benefits. (Max character : 76 characters)",
 
   "plan_names": [
     "Create 5 short, catchy mobile plan names that align with the brand’s category '${qa.brandCategory}' and story '${qa.brandStory}'. Avoid using the brand name. Return these as a plain JSON array, e.g. ['Smart Saver', 'Unlimited Edge']"
   ],
 
   "coverage_section": {
-    "title": "Create a compelling headline that emphasizes coverage, reliability, or speed. Max 60 characters.",
-    "subtitle": "Write a short, benefit-driven sentence highlighting coast-to-coast coverage, seamless connectivity, and trust. Max 120 characters."
+    "title": "Create a compelling headline that emphasizes coverage, reliability, or speed. Max 62 characters.",
+    "subtitle": "Write a short, benefit-driven sentence highlighting coast-to-coast coverage, seamless connectivity, and trust. Max 152 characters."
   },
 
   "phone_compatibility_section": {
-    "title": "Write an inviting headline that encourages users to bring their own phone. Max 60 characters.",
-    "subtitle": "Provide a short, friendly reassurance that they can easily switch, keep their phone and number. Max 120 characters."
+    "title": "Write an inviting headline that encourages users to bring their own phone. Max 63 characters.",
+    "subtitle": "Provide a short, friendly reassurance that they can easily switch, keep their phone and number. Max 152 characters."
   }
 }
 
@@ -73,7 +73,7 @@ import { generateAllBanners } from "../utils/generarteImage";
 router.get("/generate/:sessionId", async (req: any, res: any) => {
   const { sessionId } = req.params;
 
-  console.log("Started")
+  console.log("Started");
 
   try {
     const existingContent = await prisma.brandContent.findUnique({
@@ -110,87 +110,131 @@ router.get("/generate/:sessionId", async (req: any, res: any) => {
     const output = await response.text();
     console.log("Generated Output: ", output);
 
-    try {
-      const cleanedOutput = output.replace(/```json|```/g, "").trim();
-      const content = JSON.parse(cleanedOutput);
+    const cleanedOutput = output.replace(/```json|```/g, "").trim();
+    const content = JSON.parse(cleanedOutput);
 
-      const { coverage_section, phone_compatibility_section, plan_names } = content;
-      const { brand_description, tagline } = content;
+    const { coverage_section, phone_compatibility_section, plan_names } = content;
+    const { brand_description, tagline } = content;
 
-      const customUrl = generateCustomUrl(qaMap.brandName, sessionId);
-      const pricingPlans = Array.isArray(plan_names) ? plan_names : [];
+    const customUrl = generateCustomUrl(qaMap.brandName, sessionId);
+    const pricingPlans = Array.isArray(plan_names) ? plan_names : [];
 
-      // ✅ Generate banner images
-      const {
+    // ✅ Generate banner images
+    const {
+      BannerDesktop,
+      BannerImageIpad,
+      BannerImageMobile,
+      phoneCompatibilityImage,
+      coverageSubtitleImage,
+    } = await generateAllBanners(qaMap.brandName, qaMap.brandCategory);
+
+    // ✅ Fetch logo and color values
+    const logoData = await prisma.brandLogo.findUnique({
+      where: { sessionId },
+    });
+
+    // ✅ SECOND AI CALL: Generate SEO metadata
+    const seoPrompt = `
+You are an expert SEO copywriter. Based on the brand details provided below, generate optimized metadata suitable for search engines, Open Graph (Facebook), and Twitter.
+
+Brand Details:
+- Brand Name: ${qaMap.brandName}
+- Tagline: ${tagline}
+- Brand Description: ${brand_description}
+
+Guidelines:
+- Ensure all fields are concise, compelling, and relevant to the brand.
+- Follow the exact character limits.
+- Avoid repetition across different fields.
+- Use proper casing (e.g., Title Case for titles).
+
+Respond in the following **valid JSON** format:
+{
+  "seoTitle": "...",                      // Max 60 characters - Appears as the page title in search engines
+  "seoMetaDescription": "...",           // Max 160 characters - Appears under the page title in search engine results
+  "seoOgTitle": "...",                   // Max 60 characters - Title for Facebook and other social shares
+  "seoOgDescription": "...",             // Max 160 characters - Description for Open Graph (Facebook, LinkedIn, etc.)
+  "seoTwitterTitle": "...",              // Max 60 characters - Title for Twitter card
+  "seoTwitterDescription": "..."         // Max 160 characters - Description for Twitter card
+}
+Only return the JSON. Do not include any explanation.
+`;
+
+
+    const seoModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const seoResult = await seoModel.generateContent(seoPrompt);
+    const seoResponse = await seoResult.response;
+    const seoText = await seoResponse.text();
+    const seoJSON = JSON.parse(seoText.replace(/```json|```/g, "").trim());
+
+    // ✅ Save all content (brand + SEO)
+    const brandContent = await prisma.brandContent.upsert({
+      where: { sessionId },
+      update: {
+        brandName: qaMap.brandName,
+        brandDescription: brand_description,
+        tagline,
+        logoUrl: logoData?.logoUrl ?? "",
+        primaryColor: logoData?.primaryColor ?? "#000000",
+        secondaryColor: logoData?.secondaryColor ?? null,
+        tertiaryColor: logoData?.tertiaryColor ?? null,
         BannerDesktop,
         BannerImageIpad,
         BannerImageMobile,
         phoneCompatibilityImage,
         coverageSubtitleImage,
-      } = await generateAllBanners(qaMap.brandName, qaMap.brandCategory);
+        coverageTitle: coverage_section.title,
+        coverageSubtitle: coverage_section.subtitle,
+        phoneCompatibilityTitle: phone_compatibility_section.title,
+        phoneCompatibilitySubtitle: phone_compatibility_section.subtitle,
+        customUrl,
+        pricingPlans,
+        // SEO Fields
+        seoTitle: seoJSON.seoTitle,
+        seoMetaDescription: seoJSON.seoMetaDescription,
+        seoOgTitle: seoJSON.seoOgTitle,
+        seoOgDescription: seoJSON.seoOgDescription,
+        seoTwitterTitle: seoJSON.seoTwitterTitle,
+        seoTwitterDescription: seoJSON.seoTwitterDescription,
+      },
+      create: {
+        sessionId,
+        brandName: qaMap.brandName,
+        brandDescription: brand_description,
+        tagline,
+        logoUrl: logoData?.logoUrl ?? "",
+        primaryColor: logoData?.primaryColor ?? "#000000",
+        secondaryColor: logoData?.secondaryColor ?? null,
+        tertiaryColor: logoData?.tertiaryColor ?? null,
+        BannerDesktop,
+        BannerImageIpad,
+        BannerImageMobile,
+        phoneCompatibilityImage,
+        coverageSubtitleImage,
+        coverageTitle: coverage_section.title,
+        coverageSubtitle: coverage_section.subtitle,
+        phoneCompatibilityTitle: phone_compatibility_section.title,
+        phoneCompatibilitySubtitle: phone_compatibility_section.subtitle,
+        customUrl,
+        pricingPlans,
+        // SEO Fields
+        seoTitle: seoJSON.seoTitle,
+        seoMetaDescription: seoJSON.seoMetaDescription,
+        seoOgTitle: seoJSON.seoOgTitle,
+        seoOgDescription: seoJSON.seoOgDescription,
+        seoTwitterTitle: seoJSON.seoTwitterTitle,
+        seoTwitterDescription: seoJSON.seoTwitterDescription,
+      },
+    });
 
-      // ✅ Fetch logo and color values from BrandLogo
-      const logoData = await prisma.brandLogo.findUnique({
-        where: { sessionId },
-      });
-
-      const brandContent = await prisma.brandContent.upsert({
-        where: { sessionId },
-        update: {
-          brandName: qaMap.brandName,
-          brandDescription: brand_description,
-          tagline,
-          logoUrl: logoData?.logoUrl ?? "",
-          primaryColor: logoData?.primaryColor ?? "#000000",
-          secondaryColor: logoData?.secondaryColor ?? null,
-          tertiaryColor: logoData?.tertiaryColor ?? null,
-          BannerDesktop,
-          BannerImageIpad,
-          BannerImageMobile,
-          phoneCompatibilityImage,
-          coverageSubtitleImage,
-          coverageTitle: coverage_section.title,
-          coverageSubtitle: coverage_section.subtitle,
-          phoneCompatibilityTitle: phone_compatibility_section.title,
-          phoneCompatibilitySubtitle: phone_compatibility_section.subtitle,
-          customUrl,
-          pricingPlans,
-        },
-        create: {
-          sessionId,
-          brandName: qaMap.brandName,
-          brandDescription: brand_description,
-          tagline,
-          logoUrl: logoData?.logoUrl ?? "",
-          primaryColor: logoData?.primaryColor ?? "#000000",
-          secondaryColor: logoData?.secondaryColor ?? null,
-          tertiaryColor: logoData?.tertiaryColor ?? null,
-          BannerDesktop,
-          BannerImageIpad,
-          BannerImageMobile,
-          phoneCompatibilityImage,
-          coverageSubtitleImage,
-          coverageTitle: coverage_section.title,
-          coverageSubtitle: coverage_section.subtitle,
-          phoneCompatibilityTitle: phone_compatibility_section.title,
-          phoneCompatibilitySubtitle: phone_compatibility_section.subtitle,
-          customUrl,
-          pricingPlans,
-        },
-      });
-      console.log("Ended the processs")
-      res.status(200).json({
-        result: cleanedOutput,
-        brandUrl: customUrl,
-      });
-
-    } catch (error: any) {
-      console.error("Error parsing generated content:", error);
-      res.status(500).json({ error: "Failed to parse generated content." });
-    }
+    console.log("Ended the process");
+    res.status(200).json({
+      result: cleanedOutput,
+      brandUrl: customUrl,
+    });
   } catch (error: any) {
-    console.error("Error generating brand content:", error);
-    res.status(500).json({ error: "Something went wrong while generating content." });
+    console.error("Error:", error);
+    res.status(500).json({ error: "Something went wrong during generation." });
   }
 });
 
